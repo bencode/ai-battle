@@ -18,11 +18,13 @@ export const ChatPage = component$(() => {
   const messages = useSignal<Message[]>([])
   const onlineUsers = useSignal<User[]>([])
   const currentUser = useSignal(0)
+  const likes = useSignal<Record<string, number>>({})
 
   useTask$(() => {
     const load = async () => {
       onlineUsers.value = await loadUsers()
       messages.value = await loadMessages()
+      likes.value = await loadLikes()
     }
 
     load()
@@ -33,12 +35,15 @@ export const ChatPage = component$(() => {
     }
 
     socket.onmessage = async event => {
-      const data = event.data
-      if (data === 'join') {
+      const type = event.data
+      if (type === 'join') {
         onlineUsers.value = await loadUsers()
       }
-      if (data === 'message') {
+      if (type === 'message') {
         messages.value = await loadMessages()
+      }
+      if (type === 'like') {
+        likes.value = await loadLikes()
       }
     }
 
@@ -72,6 +77,11 @@ export const ChatPage = component$(() => {
       currentMessage.value = ''
       await sendMessage(currentUser.value, msg)
     }
+  })
+
+  const handleLike = $(async (id: number) => {
+    await rds('zIncrBy', 'likes', 1, `${id}`)
+    await rds('publish', 'event', 'like')
   })
 
   return (
@@ -113,7 +123,10 @@ export const ChatPage = component$(() => {
         <h3>Online Users</h3>
         <ul>
           {onlineUsers.value.map((user, index) => (
-            <li key={index}>{user.nick}</li>
+            <li key={index} onClick$={() => handleLike(user.id)}>
+              {user.nick}
+              {likes.value[user.id] ? <span>({likes.value[user.id]})</span> : null}
+            </li>
           ))}
         </ul>
       </div>
@@ -142,4 +155,20 @@ async function loadMessages() {
     return { ...msg, user: map.get(msg.userId) }
   })
   return result
+}
+
+async function loadLikes() {
+  type Item = { score: number; value: string }
+  const likes: Item[] = await rds('zRangeWithScores', 'likes', 0, -1)
+  if (!likes) {
+    return {}
+  }
+
+  return likes.reduce(
+    (acc, item) => {
+      acc[item.value] = item.score
+      return acc
+    },
+    {} as Record<string, number>,
+  )
 }
