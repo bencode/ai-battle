@@ -1,12 +1,22 @@
 import { component$, useSignal, $ } from '@builder.io/qwik'
+import { rds } from '../utils/rds'
 
 export const ChatPage = component$(() => {
   const isLoggedIn = useSignal(false)
   const currentMessage = useSignal('')
   const messages = useSignal<string[]>([])
   const onlineUsers = useSignal<string[]>(['Alice', 'Bob', 'Charlie'])
-  const handleJoin = $(() => {
-    isLoggedIn.value = true
+
+  const handleJoin = $(async () => {
+    const userId = await rds('incr', 'genUserId')
+
+    // rPush只能是字符串
+    await rds('rPush', 'users', `${userId}`)
+
+    const userKey = `users:${userId}`
+    const nick = `User ${userId}`
+    await rds('hSet', userKey, 'nick', nick)
+    await rds('expire', userKey, 60)
   })
 
   const handleSend = $(() => {

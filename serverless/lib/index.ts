@@ -43,6 +43,7 @@ async function startWebServer({ redis }: Services) {
             return Response.json({ success: true, data: result })
           } catch (e) {
             const err = e as Error
+            globalThis.console.error(e)
             return Response.json({ success: false, message: err.message })
           }
         },
