@@ -14,6 +14,7 @@ async function start() {
     .connect()
 
   await startWebServer({ redis: client })
+  await startWebsocket({ redis: client })
 }
 
 type RedisClient = Awaited<ReturnType<typeof createClient>>
@@ -52,6 +53,27 @@ async function startWebServer({ redis }: Services) {
 
     fetch(_req: unknown) {
       return new Response('Not Found', { status: 404 })
+    },
+  })
+}
+
+async function startWebsocket({ redis }: Services) {
+  Bun.serve({
+    port: 3002,
+
+    async fetch(req, server) {},
+
+    websocket: {
+      open(ws) {},
+
+      message(ws, message) {
+        console.log('收到消息:', message)
+        ws.send(`回显: ${message}`)
+      },
+
+      close(ws, code, reason) {
+        console.log(`连接关闭：${code} ${reason}`)
+      },
     },
   })
 }
