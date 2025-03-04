@@ -13,18 +13,23 @@ async function start() {
     .on('error', err => console.log('Redis Client Error', err))
     .connect()
 
-  await startWebServer({ redis: client })
-  await startWebsocket({ redis: client })
+  const subscriber = await createClient()
+    .on('error', err => console.log('Redis Publisher Error'))
+    .connect()
+
+  await startWebServer({ client, subscriber })
+  await startWebsocket({ client, subscriber })
 }
 
 type RedisClient = Awaited<ReturnType<typeof createClient>>
 type Services = {
-  redis: RedisClient
+  client: RedisClient
+  subscriber: RedisClient
 }
 
 type Fn = (...args: any[]) => unknown
 
-async function startWebServer({ redis }: Services) {
+async function startWebServer({ client }: Services) {
   Bun.serve({
     port: 3001,
 
@@ -34,13 +39,13 @@ async function startWebServer({ redis }: Services) {
       '/api/rds': {
         POST: async req => {
           const [cmd, ...args] = await req.json()
-          debug('%s %o', cmd, args)
-          const fn = redis[cmd as keyof typeof redis] as unknown as Fn
+          debug('RDS: %s %o', cmd, args)
+          const fn = client[cmd as keyof typeof client] as unknown as Fn
           if (!fn) {
             return Response.json({ success: false, message: `Invalid Redis command: ${cmd}` })
           }
           try {
-            const result = await fn.apply(redis, args)
+            const result = await fn.apply(client, args)
             return Response.json({ success: true, data: result })
           } catch (e) {
             const err = e as Error
@@ -57,23 +62,33 @@ async function startWebServer({ redis }: Services) {
   })
 }
 
-async function startWebsocket({ redis }: Services) {
-  Bun.serve({
+async function startWebsocket({ client, subscriber }: Services) {
+  const server = Bun.serve({
     port: 3002,
 
-    async fetch(req, server) {},
+    async fetch(req, server) {
+      server.upgrade(req, { data: {} })
+    },
 
     websocket: {
-      open(ws) {},
+      async open(ws) {
+        debug('ws open')
+        ws.subscribe('pub')
+      },
 
-      message(ws, message) {
-        console.log('收到消息:', message)
-        ws.send(`回显: ${message}`)
+      async message(ws, message) {
+        debug('ws message', message)
       },
 
       close(ws, code, reason) {
-        console.log(`连接关闭：${code} ${reason}`)
+        debug('ws close', code, reason)
+        ws.unsubscribe('message')
       },
     },
+  })
+
+  subscriber.subscribe('pub', msg => {
+    debug('ws: publish', msg)
+    server.publish('pub', msg)
   })
 }

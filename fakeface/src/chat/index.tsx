@@ -1,4 +1,4 @@
-import { component$, useSignal, $ } from '@builder.io/qwik'
+import { component$, useSignal, $, useTask$ } from '@builder.io/qwik'
 import { rds } from '../utils/rds'
 
 export const ChatPage = component$(() => {
@@ -6,6 +6,31 @@ export const ChatPage = component$(() => {
   const currentMessage = useSignal('')
   const messages = useSignal<string[]>([])
   const onlineUsers = useSignal<string[]>(['Alice', 'Bob', 'Charlie'])
+
+  useTask$(() => {
+    const socket = new WebSocket('ws://localhost:3002')
+    socket.onopen = () => {
+      console.log('open')
+    }
+
+    socket.onmessage = event => {
+      const data = event.data
+      console.log('onmessage', data)
+    }
+
+    socket.onerror = error => {
+      console.error('WebSocket error:', error)
+    }
+
+    socket.onclose = () => {
+      console.log('WebSocket closed')
+    }
+
+    return () => {
+      console.log('WebSocket close')
+      socket.close()
+    }
+  })
 
   const handleJoin = $(async () => {
     const userId = await rds('incr', 'genUserId')
@@ -17,6 +42,7 @@ export const ChatPage = component$(() => {
     const nick = `User ${userId}`
     await rds('hSet', userKey, 'nick', nick)
     await rds('expire', userKey, 60)
+    await rds('publish', 'pub', 'join')
   })
 
   const handleSend = $(() => {
