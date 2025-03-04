@@ -6,7 +6,7 @@ export const StorePage = component$(() => {
   const error = useSignal('')
 
   const handlePost = $(async () => {
-    const expr = text.value.split(/\s+/)
+    const expr = getTokens(text.value)
     text.value = ''
     const response = await fetch('/api/rds', {
       method: 'POST',
@@ -29,26 +29,32 @@ export const StorePage = component$(() => {
   })
 
   return (
-    <div>
-      <textarea
-        rows={5}
-        cols={40}
-        value={text.value}
-        onInput$={e => (text.value = (e.target as HTMLTextAreaElement).value)}
-      />
-      <br />
-      <button onClick$={handlePost}>Submit</button>
-      {result.value ? (
-        <div>
-          <h3>Output: </h3>
+    <div style="display:flex">
+      <div style="flex: 1">
+        <textarea
+          rows={10}
+          cols={60}
+          value={text.value}
+          onInput$={e => (text.value = (e.target as HTMLTextAreaElement).value)}
+          onKeyDown$={e => {
+            if (!e.ctrlKey && !e.metaKey && e.key === 'Enter') {
+              e.preventDefault()
+              handlePost()
+            }
+          }}
+        />
+        <br />
+        <button onClick$={handlePost}>Submit</button>
+      </div>
+      <div style="flex: 1">
+        {result.value ? (
           <div>
             <Preview value={result.value} />
           </div>
-        </div>
-      ) : null}
-      {error.value ? (
-        <div
-          style="
+        ) : null}
+        {error.value ? (
+          <div
+            style="
         color: red;
         background-color: #ffe6e6;
         padding: 10px;
@@ -56,10 +62,11 @@ export const StorePage = component$(() => {
         border-radius: 4px;
         font-size: 14px;
       "
-        >
-          {error.value}
-        </div>
-      ) : null}
+          >
+            {error.value}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 })
@@ -74,3 +81,13 @@ const Preview = component$(({ value }: PreviewProps) => {
   }
   return <div>{`${value}`}</div>
 })
+
+function getTokens(body: string) {
+  const regex = /"((?:\\.|[^"\\])*)"|(\S+)/g
+  const tokens = []
+  let match
+  while ((match = regex.exec(body)) !== null) {
+    tokens.push(match[1] || match[2])
+  }
+  return tokens
+}
