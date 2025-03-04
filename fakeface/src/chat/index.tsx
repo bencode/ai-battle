@@ -1,13 +1,32 @@
 import { component$, useSignal, $, useTask$ } from '@builder.io/qwik'
 import { rds, rdss } from '../utils/rds'
 
+type User = {
+  id: number
+  nick: string
+}
+
+type Message = {
+  userId: number
+  user?: User
+  body: string
+  time: Date
+}
+
 export const ChatPage = component$(() => {
-  const isLoggedIn = useSignal(false)
   const currentMessage = useSignal('')
-  const messages = useSignal<string[]>([])
+  const messages = useSignal<Message[]>([])
   const onlineUsers = useSignal<User[]>([])
+  const currentUser = useSignal(0)
 
   useTask$(() => {
+    const load = async () => {
+      onlineUsers.value = await loadUsers()
+      messages.value = await loadMessages()
+    }
+
+    load()
+
     const socket = new WebSocket('ws://localhost:3002')
     socket.onopen = () => {
       console.log('open')
@@ -17,6 +36,9 @@ export const ChatPage = component$(() => {
       const data = event.data
       if (data === 'join') {
         onlineUsers.value = await loadUsers()
+      }
+      if (data === 'message') {
+        messages.value = await loadMessages()
       }
     }
 
@@ -36,19 +58,19 @@ export const ChatPage = component$(() => {
 
   const handleJoin = $(async () => {
     const userId = await rds('incr', 'genUserId')
-
     const userKey = `users:${userId}`
     const nick = `User ${userId}`
     await rds('hSet', userKey, { id: userId, nick })
-    await rds('expire', userKey, 60)
+    await rds('expire', userKey, 60 * 10)
     await rds('publish', 'event', 'join')
+    currentUser.value = userId
   })
 
-  const handleSend = $(() => {
+  const handleSend = $(async () => {
     const msg = currentMessage.value.trim()
     if (msg !== '') {
-      messages.value = [...messages.value, msg]
       currentMessage.value = ''
+      await sendMessage(currentUser.value, msg)
     }
   })
 
@@ -58,12 +80,14 @@ export const ChatPage = component$(() => {
         <div style="flex: 1; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
           {messages.value.map((msg, index) => (
             <div key={index} style="margin-bottom: 8px;">
-              {msg}
+              <div>User: {msg.user?.nick}</div>
+              <div>Time: {`${msg.time}`}</div>
+              <div>{msg.body}</div>
             </div>
           ))}
         </div>
         <div style="margin-top: 10px;">
-          {!isLoggedIn.value ? (
+          {!currentUser.value ? (
             <button onClick$={handleJoin}>Join</button>
           ) : (
             <div>
@@ -97,11 +121,25 @@ export const ChatPage = component$(() => {
   )
 })
 
-type User = {
-  nick: string
-}
 async function loadUsers() {
   const keys: string[] = await rds('keys', 'users:*')
   const users = await rdss(keys.map(key => ['hGetAll', key]))
   return users as User[]
+}
+
+async function sendMessage(userId: number, body: string) {
+  const message = { userId, body, time: new Date() }
+  await rds('lPush', 'messages', JSON.stringify(message))
+  await rds('publish', 'event', 'message')
+}
+
+async function loadMessages() {
+  const rlist: string[] = await rds('lRange', 'messages', 0, 10)
+  const messages: Message[] = rlist.reverse().map(json => JSON.parse(json))
+  const users = await loadUsers()
+  const map = new Map(users.map(user => [+user.id, user]))
+  const result = messages.map(msg => {
+    return { ...msg, user: map.get(msg.userId) }
+  })
+  return result
 }
