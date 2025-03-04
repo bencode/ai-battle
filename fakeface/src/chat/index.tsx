@@ -1,11 +1,11 @@
 import { component$, useSignal, $, useTask$ } from '@builder.io/qwik'
-import { rds } from '../utils/rds'
+import { rds, rdss } from '../utils/rds'
 
 export const ChatPage = component$(() => {
   const isLoggedIn = useSignal(false)
   const currentMessage = useSignal('')
   const messages = useSignal<string[]>([])
-  const onlineUsers = useSignal<string[]>(['Alice', 'Bob', 'Charlie'])
+  const onlineUsers = useSignal<User[]>([])
 
   useTask$(() => {
     const socket = new WebSocket('ws://localhost:3002')
@@ -13,9 +13,11 @@ export const ChatPage = component$(() => {
       console.log('open')
     }
 
-    socket.onmessage = event => {
+    socket.onmessage = async event => {
       const data = event.data
-      console.log('onmessage', data)
+      if (data === 'join') {
+        onlineUsers.value = await loadUsers()
+      }
     }
 
     socket.onerror = error => {
@@ -35,14 +37,11 @@ export const ChatPage = component$(() => {
   const handleJoin = $(async () => {
     const userId = await rds('incr', 'genUserId')
 
-    // rPush只能是字符串
-    await rds('rPush', 'users', `${userId}`)
-
     const userKey = `users:${userId}`
     const nick = `User ${userId}`
-    await rds('hSet', userKey, 'nick', nick)
+    await rds('hSet', userKey, { id: userId, nick })
     await rds('expire', userKey, 60)
-    await rds('publish', 'pub', 'join')
+    await rds('publish', 'event', 'join')
   })
 
   const handleSend = $(() => {
@@ -90,10 +89,19 @@ export const ChatPage = component$(() => {
         <h3>Online Users</h3>
         <ul>
           {onlineUsers.value.map((user, index) => (
-            <li key={index}>{user}</li>
+            <li key={index}>{user.nick}</li>
           ))}
         </ul>
       </div>
     </div>
   )
 })
+
+type User = {
+  nick: string
+}
+async function loadUsers() {
+  const keys: string[] = await rds('keys', 'users:*')
+  const users = await rdss(keys.map(key => ['hGetAll', key]))
+  return users as User[]
+}

@@ -27,9 +27,19 @@ type Services = {
   subscriber: RedisClient
 }
 
+type Action = [cmd: string, ...args: unknown]
 type Fn = (...args: any[]) => unknown
 
 async function startWebServer({ client }: Services) {
+  const call = async ([cmd, ...args]: Action) => {
+    debug('RDS %s, %o', cmd, args)
+    const fn = client[cmd as keyof typeof client] as unknown as Fn
+    if (!fn) {
+      throw new Error(`Invalid Redis command: ${cmd}`)
+    }
+    return fn.apply(client, args)
+  }
+
   Bun.serve({
     port: 3001,
 
@@ -38,15 +48,25 @@ async function startWebServer({ client }: Services) {
 
       '/api/rds': {
         POST: async req => {
-          const [cmd, ...args] = await req.json()
-          debug('RDS: %s %o', cmd, args)
-          const fn = client[cmd as keyof typeof client] as unknown as Fn
-          if (!fn) {
-            return Response.json({ success: false, message: `Invalid Redis command: ${cmd}` })
-          }
+          const action = await req.json()
           try {
-            const result = await fn.apply(client, args)
+            const result = await call(action)
             return Response.json({ success: true, data: result })
+          } catch (e) {
+            const err = e as Error
+            globalThis.console.error(e)
+            return Response.json({ success: false, message: err.message })
+          }
+        },
+      },
+
+      '/api/rdss': {
+        POST: async req => {
+          const actions = await req.json()
+          try {
+            const tasks = actions.map(call)
+            const results = await Promise.all(tasks)
+            return Response.json({ success: true, data: results })
           } catch (e) {
             const err = e as Error
             globalThis.console.error(e)
@@ -72,23 +92,23 @@ async function startWebsocket({ client, subscriber }: Services) {
 
     websocket: {
       async open(ws) {
-        debug('ws open')
-        ws.subscribe('pub')
+        debug('WS open: %o', ws.data)
+        ws.subscribe('event')
       },
 
       async message(ws, message) {
-        debug('ws message', message)
+        debug('WS message', message)
       },
 
       close(ws, code, reason) {
-        debug('ws close', code, reason)
-        ws.unsubscribe('message')
+        debug('WS close', code, reason)
+        ws.unsubscribe('event')
       },
     },
   })
 
-  subscriber.subscribe('pub', msg => {
-    debug('ws: publish', msg)
-    server.publish('pub', msg)
+  subscriber.subscribe('event', msg => {
+    debug('WS: publish event', msg)
+    server.publish('event', msg)
   })
 }
