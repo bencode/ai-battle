@@ -1,0 +1,16 @@
+{
+  "name": "serverless",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "^1.2.4",
+    "@types/debug": "^4.1.12"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "debug": "^4.4.0",
+    "redis": "^4.7.0"
+  }
+}
